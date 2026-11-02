@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1c1a17">
+  <title>웹 오목 마스터</title>
+  <meta name="description" content="5단계 난이도 AI와 겨루는 15×15 웹 오목 게임 (렌주룰 지원)">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- ===================== 메인 화면 ===================== -->
+  <main id="screen-main" class="screen active" aria-labelledby="main-title">
+    <div class="menu">
+      <header class="brand">
+        <div class="brand-mark" aria-hidden="true"><span class="s b"></span><span class="s w"></span></div>
+        <h1 id="main-title">웹 오목 마스터</h1>
+        <p class="tagline">흑으로 먼저 두고, 다섯 개를 먼저 이으세요.</p>
+      </header>
+
+      <section class="panel" aria-labelledby="lv-title">
+        <h2 id="lv-title" class="panel-title">난이도 선택</h2>
+        <div class="levels" id="levels" role="radiogroup" aria-labelledby="lv-title"></div>
+      </section>
+
+      <button class="btn primary big" id="btn-start">게임 시작</button>
+
+      <div class="menu-row">
+        <button class="btn" id="btn-rules">
+          <span>룰 설정</span><small id="rules-summary"></small>
+        </button>
+        <button class="btn" id="btn-stats">
+          <span>전적 확인</span><small id="stats-summary"></small>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===================== 게임 화면 ===================== -->
+  <main id="screen-game" class="screen" aria-label="게임">
+    <div class="game">
+      <div class="topbar">
+        <button class="btn ghost small" id="btn-home" aria-label="메인으로">← 메인</button>
+        <div class="topbar-info"><span id="game-level" class="chip"></span><span id="game-rules" class="chip muted"></span></div>
+      </div>
+
+      <div class="players">
+        <div class="player" id="p-black">
+          <span class="stone-icon b" aria-hidden="true"></span>
+          <div class="pinfo">
+            <strong>플레이어</strong><small>흑 · 선공</small>
+          </div>
+          <div class="timer" id="timer" aria-live="off"><span id="timer-text">--</span></div>
+          <div class="timer-bar"><i id="timer-bar"></i></div>
+        </div>
+        <div class="vs">VS</div>
+        <div class="player" id="p-white">
+          <span class="stone-icon w" aria-hidden="true"></span>
+          <div class="pinfo">
+            <strong>AI</strong><small id="ai-level-label">백</small>
+          </div>
+          <div class="thinking" aria-hidden="true"><i></i><i></i><i></i></div>
+        </div>
+      </div>
+
+      <div class="status" id="status" role="status" aria-live="polite">플레이어의 차례입니다</div>
+
+      <div class="board-wrap" id="board-wrap">
+        <canvas id="board" aria-label="오목판 15×15"></canvas>
+      </div>
+
+      <div class="bottombar">
+        <span class="moves" id="move-count">0수</span>
+        <span class="ai-info" id="ai-info"></span>
+        <button class="btn danger small" id="btn-resign">항복</button>
+        <button class="btn primary small hidden" id="btn-again">다시 하기</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===================== 모달 ===================== -->
+  <div class="modal" id="modal-rules" role="dialog" aria-modal="true" aria-labelledby="rules-title" hidden>
+    <div class="modal-card">
+      <h2 id="rules-title">룰 설정</h2>
+      <label class="opt">
+        <span><b>렌주룰 (흑 금수)</b><small>흑의 삼삼·사사·장목을 금지합니다. 백은 제한 없음.</small></span>
+        <input type="checkbox" id="opt-renju" class="switch">
+      </label>
+      <label class="opt" id="opt-overline-row">
+        <span><b>장목(6목 이상) 승리 인정</b><small>끄면 정확히 5목만 승리입니다.</small></span>
+        <input type="checkbox" id="opt-overline" class="switch">
+      </label>
+      <label class="opt">
+        <span><b>제한 시간 (한 수)</b><small>시간을 넘기면 패배합니다.</small></span>
+        <select id="opt-timer">
+          <option value="0">무제한</option>
+          <option value="15">15초</option>
+          <option value="30">30초</option>
+          <option value="60">60초</option>
+        </select>
+      </label>
+      <label class="opt">
+        <span><b>금수 위치 표시</b><small>렌주룰 사용 시 둘 수 없는 자리를 ×로 표시합니다.</small></span>
+        <input type="checkbox" id="opt-showforb" class="switch">
+      </label>
+      <label class="opt">
+        <span><b>수순 번호 표시</b><small>돌 위에 착수 순서를 표시합니다.</small></span>
+        <input type="checkbox" id="opt-numbers" class="switch">
+      </label>
+      <div class="modal-actions"><button class="btn primary" data-close>확인</button></div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-stats" role="dialog" aria-modal="true" aria-labelledby="stats-title" hidden>
+    <div class="modal-card">
+      <h2 id="stats-title">전적</h2>
+      <table class="stats">
+        <thead><tr><th>난이도</th><th>승</th><th>패</th><th>무</th><th>승률</th></tr></thead>
+        <tbody id="stats-body"></tbody>
+      </table>
+      <h3 class="sub">최근 경기</h3>
+      <ul class="history" id="stats-history"></ul>
+      <div class="modal-actions">
+        <button class="btn ghost" id="btn-reset-stats">전적 초기화</button>
+        <button class="btn primary" data-close>닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
+    <div class="modal-card narrow">
+      <h2 id="confirm-title">확인</h2>
+      <p id="confirm-text"></p>
+      <div class="modal-actions">
+        <button class="btn ghost" data-close>취소</button>
+        <button class="btn danger" id="confirm-ok">확인</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-result" role="dialog" aria-modal="true" aria-labelledby="result-title" hidden>
+    <div class="modal-card narrow result">
+      <div class="result-icon" id="result-icon" aria-hidden="true"></div>
+      <h2 id="result-title">승리!</h2>
+      <p id="result-text"></p>
+      <div class="modal-actions column">
+        <button class="btn primary" id="result-again">다시 하기</button>
+        <button class="btn" id="result-review">판 확인하기</button>
+        <button class="btn ghost" id="result-home">메인으로</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/rules.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
