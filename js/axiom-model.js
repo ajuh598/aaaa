@@ -1,33 +1,106 @@
 /*
  * AXIOM 런타임 모델 — 자동 생성 파일입니다. 직접 수정하지 마세요.
- * 생성: node training/train.js --promote  (원본: training/models/axiom-v0.json)
+ * 생성: node training/train.js --promote  (원본: training/models/axiom-v1.json)
  */
 (function (root, model) {
   if (typeof module !== 'undefined' && module.exports) module.exports = model;
   else root.AXIOM_MODEL = model;
 })(typeof self !== 'undefined' ? self : this, {
   "name": "AXIOM",
-  "version": "v0",
+  "version": "v1",
+  "parent": "AXIOM-v0",
+  "createdAt": "2026-11-02T17:16:35.492Z",
+  "features": [
+    "tempo",
+    "me.B2",
+    "me.L2",
+    "me.B3",
+    "me.L3",
+    "me.B4",
+    "me.L4",
+    "me.D4",
+    "me.3-3",
+    "me.4-3",
+    "op.B2",
+    "op.L2",
+    "op.B3",
+    "op.L3",
+    "op.B4",
+    "op.L4",
+    "op.D4",
+    "op.3-3",
+    "op.4-3"
+  ],
   "weights": [
-    150,
-    8,
-    45,
-    50,
-    260,
-    300,
+    153,
+    21,
+    64,
+    61,
+    353,
+    335,
     2600,
     2600,
-    1500,
+    1559,
     3000,
-    -8,
-    -45,
-    -50,
-    -260,
-    -300,
-    -2600,
-    -2600,
-    -1500,
-    -3000
+    -14,
+    -48,
+    -59,
+    -286,
+    -311,
+    -2122,
+    -2611,
+    -1519,
+    -2990
+  ],
+  "training": {
+    "selfPlayGames": 12000,
+    "positions": 437393,
+    "humanGames": 0,
+    "evalGames": 8100,
+    "generations": 4,
+    "thisRun": {
+      "selfPlayGames": 12000,
+      "positions": 437393,
+      "humanGames": 0,
+      "evalGames": 8100,
+      "minutes": 11.5,
+      "dataDepth": 3,
+      "gateDepth": 3,
+      "evalDepth": 4
+    }
+  },
+  "evaluation": {
+    "opponent": "AXIOM-v0",
+    "rules": "renju",
+    "depth": 4,
+    "games": 1600,
+    "wins": 822,
+    "losses": 750,
+    "draws": 28,
+    "score": 0.5225,
+    "elo": 16,
+    "eloErr": 17,
+    "los": 0.9653,
+    "blackWinRate": 0.509
+  },
+  "history": [
+    {
+      "version": "v1",
+      "parent": "AXIOM-v0",
+      "createdAt": "2026-11-02T17:16:35.493Z",
+      "passed": true,
+      "evaluation": {
+        "games": 1600,
+        "wins": 822,
+        "losses": 750,
+        "draws": 28,
+        "score": 0.5225,
+        "elo": 16,
+        "eloErr": 17,
+        "los": 0.9653,
+        "blackWinRate": 0.509
+      }
+    }
   ],
   "book": {}
 });
