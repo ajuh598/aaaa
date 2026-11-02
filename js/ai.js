@@ -1,5 +1,7 @@
 /*
- * 오목 AI 엔진
+ * AXIOM — 웹 오목 마스터 전용 오목 AI 엔진
+ *  - 평가 함수 가중치는 모델 파일(js/axiom-model.js)에서 읽는다. 모델은 자체 대국(self-play)
+ *    결과로 학습되고, 이전 버전과의 대국 평가를 통과해야 새 버전(AXIOM-vN)이 된다.
  *  - 9칸 라인 패턴 룩업 테이블(3^8 = 6561)로 각 빈칸의 공격/수비 형태를 증분 계산
  *  - 위협 기반 후보수 생성(5목 > 열린4 > 열린3 방어 강제)
  *  - Negamax + Alpha-Beta + 반복 심화 + 트랜스포지션 테이블(Zobrist)
@@ -7,11 +9,13 @@
  * 난이도(1~5)에 따라 탐색 깊이·후보 폭·무작위성·VCF 사용 여부가 달라진다.
  */
 (function (root, factory) {
-  const R = (typeof module !== 'undefined' && module.exports) ? require('./rules.js') : root.OmokRules;
-  const api = factory(R);
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  const isNode = typeof module !== 'undefined' && module.exports;
+  const R = isNode ? require('./rules.js') : root.OmokRules;
+  const M = isNode ? require('./axiom-model.js') : root.AXIOM_MODEL;
+  const api = factory(R, M);
+  if (isNode) module.exports = api;
   else root.OmokAI = api;
-})(typeof self !== 'undefined' ? self : this, function (R) {
+})(typeof self !== 'undefined' ? self : this, function (R, MODEL) {
   'use strict';
 
   const N = 15, SIZE = 225, CENTER = 112;
@@ -23,6 +27,24 @@
   const W = [0, 8, 45, 50, 260, 300, 2600, 2600, 20000];
   // 칸 위협 레벨: 0 없음, 1 열린3, 2 4, 3 삼삼, 4 사삼, 5 열린4/사사, 6 5목
   const LS = [0, 700, 1000, 20000, 40000, 150000, 5000000];
+
+  // ---------------------------------------------------------------------------
+  // 평가 함수 특징(feature) — 둘 차례인 쪽(me) 기준
+  //   0: 템포(상수항)
+  //   1..7: 내 빈칸 형태 개수 (B2 L2 B3 L3 B4 L4 D4),   8: 내 삼삼 자리, 9: 내 사삼 자리
+  //   10..16: 상대 빈칸 형태 개수,                     17: 상대 삼삼 자리, 18: 상대 사삼 자리
+  // 평가값 = Σ w[i] · f[i]  (학습 대상 가중치 w 는 모델 파일에 저장)
+  // ---------------------------------------------------------------------------
+  const NF = 19;
+  const FEATURE_NAMES = ['tempo',
+    'me.B2', 'me.L2', 'me.B3', 'me.L3', 'me.B4', 'me.L4', 'me.D4', 'me.3-3', 'me.4-3',
+    'op.B2', 'op.L2', 'op.B3', 'op.L3', 'op.B4', 'op.L4', 'op.D4', 'op.3-3', 'op.4-3'];
+  // 손으로 설계한 초기 가중치 (학습 이전 기준선 = v0)
+  const BASELINE_WEIGHTS = [150, 8, 45, 50, 260, 300, 2600, 2600, 1500, 3000,
+    -8, -45, -50, -260, -300, -2600, -2600, -1500, -3000];
+  const OPP_FIVE_W = 20000; // 상대 5목 자리(막아야 하는 자리) — 전술 영역이라 학습하지 않음
+  const DEFAULT_MODEL = { name: 'AXIOM', version: 'v0', weights: BASELINE_WEIGHTS, book: {} };
+  const ACTIVE_MODEL = (MODEL && MODEL.weights && MODEL.weights.length === NF) ? MODEL : DEFAULT_MODEL;
 
   const WIN = 100000000;
   const WIN_TH = WIN - 1000;
@@ -161,8 +183,10 @@
   // 엔진
   // ---------------------------------------------------------------------------
   class Engine {
-    constructor(rules) {
+    constructor(rules, weights) {
       rules = rules || {};
+      this.w = Float64Array.from(weights || ACTIVE_MODEL.weights);
+      this.sc = [null, new Int32Array(9), new Int32Array(9)]; // 빈칸 형태 개수 (특징)
       this.renju = !!rules.renju;
       this.allowOverline = !!rules.allowOverline;
       const blackExact = this.renju || !this.allowOverline;
@@ -249,6 +273,10 @@
         if (this.board[i] === 0) {
           this.total[c] += this.ceval[c][i];
           this.cnt[c][this.level[c][i]]++;
+          if (!(c === 1 && this.forb[i])) {
+            const sh = this.shape[c], sc = this.sc[c], k = i * 4;
+            sc[sh[k]]++; sc[sh[k + 1]]++; sc[sh[k + 2]]++; sc[sh[k + 3]]++;
+          }
         }
       }
     }
@@ -258,6 +286,10 @@
       for (let c = 1; c <= 2; c++) {
         this.total[c] -= this.ceval[c][i];
         this.cnt[c][this.level[c][i]]--;
+        if (!(c === 1 && this.forb[i])) {
+          const sh = this.shape[c], sc = this.sc[c], k = i * 4;
+          sc[sh[k]]--; sc[sh[k + 1]]--; sc[sh[k + 2]]--; sc[sh[k + 3]]--;
+        }
       }
     }
 
@@ -354,9 +386,34 @@
       if (this.cnt[o][6] === 0 && this.cnt[p][5] > 0) {
         const oFours = this.cnt[o][2] + this.cnt[o][4] + this.cnt[o][5];
         if (oFours === 0) return WIN - ply - 3;
-        return this.total[p] - this.total[o] + 30000;
+        return this.staticEval(p) + 30000;
       }
-      return this.total[p] - this.total[o] + 150; // 둘 차례인 쪽의 템포 보너스
+      return this.staticEval(p);
+    }
+
+    /** 학습된 가중치로 계산하는 정적 평가 (둘 차례인 p 기준) */
+    staticEval(p) {
+      const o = 3 - p, w = this.w, a = this.sc[p], b = this.sc[o];
+      let v = w[0];
+      for (let s = 1; s <= 7; s++) v += w[s] * a[s] + w[9 + s] * b[s];
+      v += w[8] * this.cnt[p][3] + w[9] * this.cnt[p][4] + w[17] * this.cnt[o][3] + w[18] * this.cnt[o][4];
+      v -= OPP_FIVE_W * b[S_FIVE];
+      return Math.round(v);
+    }
+
+    /** 학습용 특징 벡터 (둘 차례인 p 기준) */
+    features(p) {
+      const o = 3 - p, a = this.sc[p], b = this.sc[o], f = new Array(NF);
+      f[0] = 1;
+      for (let s = 1; s <= 7; s++) { f[s] = a[s]; f[9 + s] = b[s]; }
+      f[8] = this.cnt[p][3]; f[9] = this.cnt[p][4]; f[17] = this.cnt[o][3]; f[18] = this.cnt[o][4];
+      return f;
+    }
+
+    /** 전술적으로 조용한 국면인지 (학습 데이터 선별용) */
+    isQuiet(p) {
+      const o = 3 - p;
+      return this.cnt[p][6] === 0 && this.cnt[o][6] === 0 && this.cnt[p][5] === 0 && this.cnt[p][4] === 0;
     }
 
     key() { return (this.h1 >>> 0) * 2097152 + (this.h2 & 0x1FFFFF); }
@@ -487,8 +544,9 @@
     // -------------------------------------------------------------------------
     // 루트 탐색 (반복 심화)
     // -------------------------------------------------------------------------
-    rootSearch(p, cfg, moves) {
+    rootSearch(p, cfg, moves, adj) {
       const o = 3 - p;
+      adj = adj || null;
       this.K = cfg.K;
       let best = moves[0], bestScore = -INF, depthDone = 0;
       let order = moves.slice();
@@ -501,11 +559,13 @@
           const sc = new Map();
           for (const m of order) {
             let s;
+            const bonus = adj ? (adj.get(m) || 0) : 0; // 경험 학습 보정
             if (this.level[p][m] === 6) s = WIN - 1;
             else {
               this.make(m, p);
-              s = -this.search(o, depth - 1, -INF, cfg.exactRoot ? INF : -alpha, 1);
+              s = -this.search(o, depth - 1, -INF, cfg.exactRoot ? INF : -(alpha - bonus), 1);
               this.unmake();
+              if (s < WIN_TH && s > -WIN_TH) s += bonus;
             }
             sc.set(m, s);
             if (s > iterScore) { iterScore = s; iterBest = m; }
@@ -525,7 +585,7 @@
       return { best, bestScore, depthDone, order, scores };
     }
 
-    think(p, cfg, rng) {
+    think(p, cfg, rng, exp) {
       rng = rng || Math.random;
       const t0 = now();
       this.nodes = 0;
@@ -548,7 +608,21 @@
         if (v >= 0) { info.vcf = true; return done(v); }
       }
 
-      const res = this.rootSearch(p, cfg, moves);
+      // 경험(내 대국 기록 + 모델 오프닝 북)으로 루트 후보 보정
+      let adj = null;
+      if (exp && exp.stats) {
+        adj = new Map();
+        for (const m of moves) {
+          const st = exp.stats[canonMove(exp.syms, m)];
+          if (!st) continue;
+          const n = st[0] + st[1] + st[2];
+          const b = Math.round(EXP_W * (st[0] - st[1]) / (n + 1));
+          if (b) adj.set(m, b);
+        }
+        if (adj.size) info.experience = adj.size; else adj = null;
+      }
+
+      const res = this.rootSearch(p, cfg, moves, adj);
       info.depth = res.depthDone;
       info.score = res.bestScore;
       let move = res.best;
@@ -631,17 +705,115 @@
     5: { name: '익스트림', mode: 'search', depth: 12, K: 12, rootK: 18, time: 4000, vcf: 24, vcfNodes: 60000, defendVcf: 16, defendTries: 8 }
   };
 
-  /** moves: 지금까지의 착수(칸 인덱스) 순서. 흑부터 번갈아 둔 것으로 본다. */
+  // ---------------------------------------------------------------------------
+  // 경험 학습용 국면 키: 8방향 대칭을 합친 정규형의 해시
+  //   experience[key][canonicalMove] = [승, 패, 무]  (AI 관점)
+  // ---------------------------------------------------------------------------
+  // 경험 보정 상한(평가 단위). 학습된 스케일에서 약 승률 ±15%p에 해당.
+  // 보정 = EXP_W · (승 - 패) / (판수 + 1)  →  1패: -2000, 4패: -3200
+  const EXP_W = 4000;
+
+  function symIdx(sym, idx) {
+    let x = idx % N, y = (idx / N) | 0;
+    if (sym & 4) { const t = x; x = y; y = t; }
+    if (sym & 1) x = N - 1 - x;
+    if (sym & 2) y = N - 1 - y;
+    return y * N + x;
+  }
+
+  function ruleCode(rules) {
+    return rules && rules.renju ? 'R' : (rules && rules.allowOverline ? 'F6' : 'F5');
+  }
+
+  /** 정규형으로 보내는 대칭들(syms) 아래에서 수의 대표 좌표 — 대칭인 국면의 같은 수를 하나로 묶는다 */
+  function canonMove(syms, m) {
+    let c = 225;
+    for (const sym of syms) { const v = symIdx(sym, m); if (v < c) c = v; }
+    return c;
+  }
+
+  function positionKey(moves, rules) {
+    let best = null, syms = [];
+    for (let sym = 0; sym < 8; sym++) {
+      const codes = moves.map((m, k) => (k % 2 ? 2 : 1) * 1000 + symIdx(sym, m)).sort((a, b) => a - b).join(',');
+      if (best === null || codes < best) { best = codes; syms = [sym]; }
+      else if (codes === best) syms.push(sym);
+    }
+    // FNV-1a 두 개로 53비트 해시
+    let h1 = 0x811c9dc5, h2 = 0x01000193;
+    for (let i = 0; i < best.length; i++) {
+      const c = best.charCodeAt(i);
+      h1 = Math.imul(h1 ^ c, 16777619);
+      h2 = Math.imul(h2 ^ c, 2246822519);
+    }
+    const h = (h1 >>> 0) * 2097152 + ((h2 >>> 0) & 0x1FFFFF);
+    return { key: ruleCode(rules) + ':' + moves.length + ':' + h.toString(36), syms };
+  }
+
+  /** 끝난 대국에서 AI 수의 경험을 추출. aiColor: 1|2, result: 'w'|'l'|'d' (AI 관점) */
+  function experienceFromGame(moves, rules, aiColor, result, lastPlies) {
+    const out = [];
+    const from = Math.max(0, moves.length - (lastPlies || 20));
+    for (let k = from; k < moves.length; k++) {
+      if ((k % 2 === 0 ? 1 : 2) !== aiColor) continue;
+      const pk = positionKey(moves.slice(0, k), rules);
+      out.push({ key: pk.key, move: canonMove(pk.syms, moves[k]), result });
+    }
+    return out;
+  }
+
+  function addExperience(store, items) {
+    for (const it of items) {
+      const e = store[it.key] || (store[it.key] = {});
+      const st = e[it.move] || (e[it.move] = [0, 0, 0]);
+      st[it.result === 'w' ? 0 : it.result === 'l' ? 1 : 2]++;
+    }
+    return store;
+  }
+
+  /** 여러 경험 저장소(모델 북, 로컬 경험)에서 한 국면의 통계를 합친다 */
+  function lookupExperience(moves, rules, stores) {
+    const pk = positionKey(moves, rules);
+    let stats = null;
+    for (const st of stores) {
+      const e = st && st[pk.key];
+      if (!e) continue;
+      stats = stats || {};
+      for (const m in e) {
+        const a = stats[m] || (stats[m] = [0, 0, 0]);
+        a[0] += e[m][0]; a[1] += e[m][1]; a[2] += e[m][2];
+      }
+    }
+    return stats ? { syms: pk.syms, stats } : null;
+  }
+
+  /**
+   * moves: 지금까지의 착수(칸 인덱스) 순서. 흑부터 번갈아 둔 것으로 본다.
+   * opts.exp: lookupExperience 결과, opts.weights: 가중치 직접 지정(학습용)
+   */
   function chooseMove(moves, level, rules, opts) {
     opts = opts || {};
-    const eng = new Engine(rules);
+    const eng = new Engine(rules, opts.weights);
     for (let k = 0; k < moves.length; k++) eng.make(moves[k], k % 2 === 0 ? 1 : 2);
     const p = moves.length % 2 === 0 ? 1 : 2;
     const cfg = Object.assign({}, LEVELS[level] || LEVELS[3], opts.override || {});
-    const r = eng.think(p, cfg, opts.rng);
+    let exp = opts.exp;
+    if (exp === undefined && cfg.mode !== 'greedy') exp = lookupExperience(moves, rules, [ACTIVE_MODEL.book]);
+    const r = eng.think(p, cfg, opts.rng, cfg.mode === 'greedy' ? null : exp);
     if (r.move < 0 || eng.board[r.move] !== 0) r.move = eng.anyMove(p);
+    r.info.model = modelLabel();
     return r;
   }
 
-  return { Engine, LEVELS, chooseMove, WIN, _getTable: getTable, S: { S_NONE, S_B2, S_L2, S_B3, S_L3, S_B4, S_L4, S_D4, S_FIVE } };
+  function modelLabel(m) {
+    m = m || ACTIVE_MODEL;
+    return `${m.name || 'AXIOM'}-${m.version || 'v0'}`;
+  }
+
+  return {
+    Engine, LEVELS, chooseMove, WIN, NF, FEATURE_NAMES, BASELINE_WEIGHTS,
+    MODEL: ACTIVE_MODEL, modelLabel,
+    positionKey, symIdx, canonMove, experienceFromGame, addExperience, lookupExperience,
+    _getTable: getTable, S: { S_NONE, S_B2, S_L2, S_B3, S_L3, S_B4, S_L4, S_D4, S_FIVE }
+  };
 });

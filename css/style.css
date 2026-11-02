@@ -119,6 +119,30 @@ button, select, input { font: inherit; color: inherit; }
 .menu-row .btn { flex-direction: column; gap: 2px; padding: 12px; }
 .menu-row .btn small { color: var(--muted); font-weight: 500; font-size: 12px; }
 
+/* ---------- AXIOM card ---------- */
+.axiom-card {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 12px 14px; text-align: left; cursor: pointer;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+  transition: border-color .15s;
+}
+.axiom-card:hover { border-color: var(--muted); }
+.axiom-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.axiom-logo {
+  flex: none; width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center;
+  background: linear-gradient(135deg, #2b2620, #0f0d0b); color: #f3c9a8; font-weight: 800; font-size: 14px; letter-spacing: .04em;
+}
+.axiom-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.axiom-text b { display: flex; align-items: center; gap: 6px; font-size: 16px; }
+.axiom-name { letter-spacing: .06em; }
+.axiom-text small { color: var(--muted); font-size: 12.5px; }
+.axiom-more { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.axiom-desc { font-size: 13.5px; line-height: 1.55; }
+.kv { display: grid; grid-template-columns: 7.5em 1fr; gap: 6px 14px; margin: 12px 0 0; font-size: 14px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+.modal-actions.wrap { flex-wrap: wrap; }
+
 /* ---------- game ---------- */
 .game { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 10px; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -142,11 +166,6 @@ button, select, input { font: inherit; color: inherit; }
 .stone-icon { flex: none; width: 26px; height: 26px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,.3); }
 .stone-icon.b { background: radial-gradient(circle at 35% 30%, #666, #111 60%); }
 .stone-icon.w { background: radial-gradient(circle at 35% 30%, #fff, #d4cfc4 70%); }
-.timer { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 18px; }
-.timer.warn { color: var(--danger); }
-.timer-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: transparent; }
-.timer-bar i { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: left; transition: transform .1s linear; }
-.timer-bar.warn i { background: var(--danger); }
 .thinking { margin-left: auto; display: none; gap: 4px; }
 .player.active .thinking { display: flex; }
 .thinking i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: blink 1s infinite ease-in-out; }
@@ -232,8 +251,9 @@ button, select, input { font: inherit; color: inherit; }
   body { font-size: 14px; }
   .player { padding: 8px 10px; gap: 8px; }
   .stone-icon { width: 22px; height: 22px; }
-  .timer { font-size: 16px; }
   .level { padding: 10px 12px; }
+  .axiom-more { font-size: 0; }
+  .axiom-more::after { content: "›"; font-size: 18px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

@@ -1,8 +1,10 @@
-/* 웹 오목 마스터 — 화면/입력/렌더링/게임 진행 */
+/* 웹 오목 마스터 — 화면/입력/렌더링/게임 진행 + AXIOM 경험 학습 */
 (function () {
   'use strict';
 
   const R = window.OmokRules;
+  const AX = window.OmokAI;
+  const AXIOM = AX.modelLabel(); // 예: AXIOM-v1
   const N = 15, SIZE = 225;
   const MIN_AI_DELAY = 420; // AI 착수 최소 연출 시간(ms)
 
@@ -23,13 +25,22 @@
   };
   const SETTINGS_KEY = 'omok.settings.v1', STATS_KEY = 'omok.stats.v1';
   const settings = Object.assign(
-    { level: 2, renju: true, allowOverline: false, timer: 30, showForbidden: true, numbers: false },
+    { level: 2, renju: true, allowOverline: false, showForbidden: true, numbers: false },
     store.get(SETTINGS_KEY, {})
   );
+  delete settings.timer; // 제한 시간 기능 제거 (이전 저장값 정리)
   let stats = store.get(STATS_KEY, null);
   if (!stats || typeof stats !== 'object' || !stats.levels) stats = { levels: {}, history: [] };
   const saveSettings = () => store.set(SETTINGS_KEY, settings);
   const saveStats = () => store.set(STATS_KEY, stats);
+
+  // AXIOM 경험(이 브라우저에서 둔 대국에서 배운 국면) & 대국 기록(학습 데이터 내보내기용)
+  const EXP_KEY = 'axiom.experience.v1', GAMES_KEY = 'axiom.games.v1';
+  const MAX_EXP = 6000, MAX_GAMES = 300;
+  let experience = store.get(EXP_KEY, null);
+  if (!experience || typeof experience !== 'object') experience = {};
+  let gameLog = store.get(GAMES_KEY, null);
+  if (!Array.isArray(gameLog)) gameLog = [];
 
   // ---------------------------------------------------------------------------
   // DOM
@@ -40,12 +51,14 @@
     levels: $('levels'), start: $('btn-start'), rulesBtn: $('btn-rules'), statsBtn: $('btn-stats'),
     rulesSummary: $('rules-summary'), statsSummary: $('stats-summary'),
     home: $('btn-home'), gameLevel: $('game-level'), gameRules: $('game-rules'),
-    pBlack: $('p-black'), pWhite: $('p-white'), aiLevelLabel: $('ai-level-label'),
-    timer: $('timer'), timerText: $('timer-text'), timerBar: $('timer-bar'),
+    pBlack: $('p-black'), pWhite: $('p-white'), aiLevelLabel: $('ai-level-label'), aiName: $('ai-name'),
+    axiomBtn: $('btn-axiom'), axiomVersion: $('axiom-version'), axiomSummary: $('axiom-summary'),
+    axiomModelInfo: $('axiom-model-info'), axiomLocalInfo: $('axiom-local-info'),
+    exportBtn: $('btn-export'), resetExp: $('btn-reset-exp'),
     status: $('status'), wrap: $('board-wrap'), canvas: $('board'),
     moveCount: $('move-count'), aiInfo: $('ai-info'), resign: $('btn-resign'), again: $('btn-again'),
     optRenju: $('opt-renju'), optOverline: $('opt-overline'), optOverlineRow: $('opt-overline-row'),
-    optTimer: $('opt-timer'), optShowForb: $('opt-showforb'), optNumbers: $('opt-numbers'),
+    optShowForb: $('opt-showforb'), optNumbers: $('opt-numbers'),
     statsBody: $('stats-body'), statsHistory: $('stats-history'), resetStats: $('btn-reset-stats'),
     confirmText: $('confirm-text'), confirmTitle: $('confirm-title'), confirmOk: $('confirm-ok'),
     resultIcon: $('result-icon'), resultTitle: $('result-title'), resultText: $('result-text'),
@@ -59,8 +72,8 @@
   const game = {
     board: new Int8Array(SIZE), moves: [], turn: 1, over: true, result: null,
     winLine: null, forbidden: [], hover: -1, pending: -1, cursor: 112,
-    level: 2, rules: { renju: true, allowOverline: false }, timeLimit: 0,
-    deadline: 0, timerId: 0, waiting: null, reqId: 0, aiStart: 0, anim: null
+    level: 2, rules: { renju: true, allowOverline: false },
+    waiting: null, reqId: 0, aiStart: 0, anim: null
   };
 
   // ---------------------------------------------------------------------------
@@ -83,7 +96,9 @@
     game.waiting = null;
   }
   function requestAI() {
-    const req = { id: ++game.reqId, moves: game.moves.slice(), level: game.level, rules: game.rules };
+    // 모델 오프닝 북 + 이 브라우저의 경험에서 현재 국면 통계를 찾아 함께 보낸다
+    const exp = AX.lookupExperience(game.moves, game.rules, [AX.MODEL.book, experience]);
+    const req = { id: ++game.reqId, moves: game.moves.slice(), level: game.level, rules: game.rules, exp };
     game.waiting = req;
     game.aiStart = performance.now();
     if (worker) worker.postMessage(req); else runLocal(req);
@@ -91,7 +106,7 @@
   function runLocal(req) {
     setTimeout(() => {
       if (!game.waiting || game.waiting.id !== req.id) return;
-      const r = window.OmokAI.chooseMove(req.moves, req.level, req.rules);
+      const r = AX.chooseMove(req.moves, req.level, req.rules, { exp: req.exp || null });
       onAIMessage({ data: { id: req.id, move: r.move, info: r.info } });
     }, 40);
   }
@@ -110,7 +125,6 @@
   // ---------------------------------------------------------------------------
   function newGame() {
     resetWorker();
-    stopTimer();
     game.board = new Int8Array(SIZE);
     game.moves = [];
     game.turn = 1;
@@ -121,12 +135,12 @@
     game.hover = -1; game.pending = -1; game.cursor = 112;
     game.level = settings.level;
     game.rules = { renju: !!settings.renju, allowOverline: settings.renju ? false : !!settings.allowOverline };
-    game.timeLimit = +settings.timer || 0;
     game.reqId++;
 
     el.gameLevel.textContent = `Lv.${game.level} ${LEVEL_INFO[game.level].name}`;
+    el.aiName.textContent = AXIOM;
     el.aiLevelLabel.textContent = `백 · ${LEVEL_INFO[game.level].name}`;
-    el.gameRules.textContent = rulesText(game.rules, game.timeLimit);
+    el.gameRules.textContent = rulesText(game.rules);
     el.aiInfo.textContent = '';
     el.resign.classList.remove('hidden');
     el.again.classList.add('hidden');
@@ -142,7 +156,6 @@
     const threats = R.fiveThreats(game.board, 2, game.rules);
     if (threats.length) setStatus('⚠ 백이 4를 만들었습니다! 막아야 합니다', 'warn');
     else setStatus(game.moves.length === 0 ? '플레이어(흑)의 차례입니다 · 첫 수를 두세요' : '플레이어(흑)의 차례입니다');
-    startTimer();
     updatePanels();
     render();
   }
@@ -168,15 +181,14 @@
     const line = R.winningLine(game.board, idx, color, game.rules);
     if (line) {
       game.winLine = line;
-      finish(color === 1 ? 'win' : 'lose', color === 1 ? '5목을 완성했습니다!' : 'AI가 5목을 완성했습니다.');
+      finish(color === 1 ? 'win' : 'lose', color === 1 ? '5목을 완성했습니다!' : `${AXIOM}이 5목을 완성했습니다.`);
       return;
     }
     if (game.moves.length >= SIZE) { finish('draw', '판이 가득 찼습니다.'); return; }
 
     if (color === 1) {
-      stopTimer();
       game.turn = 2;
-      setStatus('AI(백)가 생각 중입니다…');
+      setStatus(`${AXIOM}(백)이 생각 중입니다…`);
       updatePanels();
       render();
       requestAI();
@@ -191,10 +203,13 @@
       move = game.board.findIndex((v) => v === 0);
       if (move < 0) { finish('draw', '판이 가득 찼습니다.'); return; }
     }
-    if (info && game.level >= 3) {
+    if (info) {
       const t = (info.time / 1000).toFixed(2);
-      el.aiInfo.textContent = info.vcf ? `AI: 연속 4 수읽기 성공 · ${t}초` :
-        info.depth ? `AI 탐색 깊이 ${info.depth} · ${t}초` : '';
+      const parts = [];
+      if (info.vcf) parts.push('연속 4 수읽기 성공');
+      else if (info.depth && game.level >= 3) parts.push(`탐색 깊이 ${info.depth}`);
+      if (info.experience) parts.push('지난 대국 경험 반영');
+      el.aiInfo.textContent = parts.length ? `${AXIOM} · ${parts.join(' · ')} · ${t}초` : '';
     }
     place(move, 2);
   }
@@ -204,9 +219,9 @@
     game.result = result;
     game.forbidden = [];
     game.hover = -1; game.pending = -1;
-    stopTimer();
     resetWorker();
     recordResult(result, reason);
+    learnFromGame(result, reason);
     updatePanels();
     el.resign.classList.add('hidden');
     el.again.classList.remove('hidden');
@@ -217,7 +232,7 @@
       if (!game.over || game.result !== result) return;
       el.resultIcon.textContent = result === 'win' ? '🏆' : result === 'lose' ? '💭' : '🤝';
       el.resultTitle.textContent = title;
-      el.resultText.textContent = `${reason} (${game.moves.length}수 · ${LEVEL_INFO[game.level].name})`;
+      el.resultText.textContent = `${reason} (${game.moves.length}수 · ${AXIOM} ${LEVEL_INFO[game.level].name})`;
       if (el.game.classList.contains('active')) openModal('modal-result');
     }, game.winLine ? 900 : 250);
   }
@@ -227,38 +242,57 @@
     const s = stats.levels[k] || (stats.levels[k] = { w: 0, l: 0, d: 0 });
     const r = result === 'win' ? 'w' : result === 'lose' ? 'l' : 'd';
     s[r]++;
-    stats.history.unshift({ t: Date.now(), lv: game.level, r, n: game.moves.length, reason });
+    stats.history.unshift({ t: Date.now(), lv: game.level, r, n: game.moves.length, reason, ai: AXIOM });
     stats.history = stats.history.slice(0, 30);
     saveStats();
     updateMenuSummary();
   }
 
   // ---------------------------------------------------------------------------
-  // 타이머 (플레이어 한 수 제한 시간)
+  // AXIOM 경험 학습: 끝난 대국의 AI 수를 결과와 함께 기억해 같은 국면에서 반영
   // ---------------------------------------------------------------------------
-  function startTimer() {
-    stopTimer();
-    if (!game.timeLimit) {
-      el.timerText.textContent = '∞';
-      el.timer.classList.remove('warn');
-      el.timerBar.style.transform = 'scaleX(1)';
-      el.timerBar.parentElement.classList.remove('warn');
-      return;
-    }
-    game.deadline = performance.now() + game.timeLimit * 1000;
-    tick();
-    game.timerId = setInterval(tick, 100);
+  function learnFromGame(result, reason) {
+    if (game.moves.length < 2) return;
+    const aiResult = result === 'win' ? 'l' : result === 'lose' ? 'w' : 'd';
+    AX.addExperience(experience, AX.experienceFromGame(game.moves, game.rules, 2, aiResult, 20));
+    const keys = Object.keys(experience);
+    for (let i = 0; i < keys.length - MAX_EXP; i++) delete experience[keys[i]]; // 오래된 경험부터 정리
+    store.set(EXP_KEY, experience);
+
+    gameLog.push({
+      t: Date.now(), ai: AXIOM, level: game.level, rules: game.rules, aiColor: 2,
+      moves: game.moves.slice(), result: result === 'win' ? 'w' : result === 'lose' ? 'l' : 'd', reason
+    });
+    if (gameLog.length > MAX_GAMES) gameLog = gameLog.slice(-MAX_GAMES);
+    store.set(GAMES_KEY, gameLog);
   }
-  function stopTimer() { if (game.timerId) { clearInterval(game.timerId); game.timerId = 0; } }
-  function tick() {
-    const left = Math.max(0, game.deadline - performance.now());
-    const sec = Math.ceil(left / 1000);
-    el.timerText.textContent = sec + '초';
-    const warn = left <= 5000;
-    el.timer.classList.toggle('warn', warn);
-    el.timerBar.parentElement.classList.toggle('warn', warn);
-    el.timerBar.style.transform = `scaleX(${left / (game.timeLimit * 1000)})`;
-    if (left <= 0) { stopTimer(); finish('lose', '제한 시간을 초과했습니다.'); }
+
+  function exportGames() {
+    const data = { format: 'axiom-games', version: 1, exportedAt: new Date().toISOString(), ai: AXIOM, games: gameLog };
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `axiom-games-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  function renderAxiomInfo() {
+    const m = AX.MODEL, t = m.training || {}, ev = m.evaluation;
+    const rows = [
+      ['버전', `${AXIOM}${m.parent ? ` (이전: ${m.parent})` : ''}`],
+      ['학습일', m.createdAt ? new Date(m.createdAt).toLocaleDateString('ko-KR') : '—'],
+      ['자체 대국 학습', t.selfPlayGames ? `${t.selfPlayGames.toLocaleString()}판 · 국면 ${t.positions.toLocaleString()}개 · ${t.generations}세대` : '학습 전 기준 모델'],
+      ['평가 대국', ev ? `${ev.opponent} 상대 ${ev.wins}승 ${ev.losses}패 ${ev.draws}무 (승점 ${(ev.score * 100).toFixed(1)}%, Elo ${ev.elo >= 0 ? '+' : ''}${ev.elo} ±${ev.eloErr})` : '—'],
+      ['오프닝 북', `${Object.keys(m.book || {}).length.toLocaleString()}개 국면`]
+    ];
+    el.axiomModelInfo.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+    const local = [
+      ['기록된 대국', `${gameLog.length}판`],
+      ['배운 국면', `${Object.keys(experience).length.toLocaleString()}개`]
+    ];
+    el.axiomLocalInfo.innerHTML = local.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   }
 
   // ---------------------------------------------------------------------------
@@ -273,18 +307,12 @@
     el.pBlack.classList.toggle('active', !game.over && game.turn === 1);
     el.pWhite.classList.toggle('active', !game.over && game.turn === 2);
     el.moveCount.textContent = game.moves.length + '수';
-    if (game.over) {
-      el.timerText.textContent = game.timeLimit ? '—' : '∞';
-      el.timer.classList.remove('warn');
-      el.timerBar.style.transform = 'scaleX(0)';
-    }
   }
   function updateForbidden() {
     game.forbidden = (game.rules.renju && settings.showForbidden && !game.over) ? R.allForbidden(game.board) : [];
   }
-  function rulesText(rules, timer) {
-    const r = rules.renju ? '렌주룰' : (rules.allowOverline ? '자유룰(장목 허용)' : '자유룰(정확히 5목)');
-    return `${r} · ${timer ? timer + '초' : '시간 무제한'}`;
+  function rulesText(rules) {
+    return rules.renju ? '렌주룰' : (rules.allowOverline ? '자유룰(장목 허용)' : '자유룰(정확히 5목)');
   }
   function showScreen(name) {
     el.main.classList.toggle('active', name === 'main');
@@ -325,7 +353,11 @@
     if (focus) el.levels.querySelector(`[data-level="${lv}"]`).focus();
   }
   function updateMenuSummary() {
-    el.rulesSummary.textContent = rulesText({ renju: settings.renju, allowOverline: settings.allowOverline }, +settings.timer);
+    el.rulesSummary.textContent = rulesText({ renju: settings.renju, allowOverline: settings.allowOverline });
+    const t = AX.MODEL.training;
+    el.axiomVersion.textContent = AX.MODEL.version || 'v0';
+    el.axiomSummary.textContent = (t && t.selfPlayGames ? `자체 대국 ${t.selfPlayGames.toLocaleString()}판 학습` : '전용 오목 AI') +
+      ` · 내 대국에서 배운 국면 ${Object.keys(experience).length.toLocaleString()}개`;
     let w = 0, l = 0, d = 0;
     for (const k in stats.levels) { w += stats.levels[k].w; l += stats.levels[k].l; d += stats.levels[k].d; }
     el.statsSummary.textContent = `${w}승 ${l}패${d ? ' ' + d + '무' : ''}`;
@@ -336,14 +368,12 @@
     el.optOverline.checked = settings.renju ? false : !!settings.allowOverline;
     el.optOverline.disabled = !!settings.renju;
     el.optOverlineRow.classList.toggle('disabled', !!settings.renju);
-    el.optTimer.value = String(settings.timer);
     el.optShowForb.checked = !!settings.showForbidden;
     el.optNumbers.checked = !!settings.numbers;
   }
   function bindRuleInputs() {
     el.optRenju.addEventListener('change', () => { settings.renju = el.optRenju.checked; saveSettings(); syncRuleInputs(); updateMenuSummary(); });
     el.optOverline.addEventListener('change', () => { settings.allowOverline = el.optOverline.checked; saveSettings(); updateMenuSummary(); });
-    el.optTimer.addEventListener('change', () => { settings.timer = +el.optTimer.value; saveSettings(); updateMenuSummary(); });
     el.optShowForb.addEventListener('change', () => { settings.showForbidden = el.optShowForb.checked; saveSettings(); });
     el.optNumbers.addEventListener('change', () => { settings.numbers = el.optNumbers.checked; saveSettings(); });
   }
@@ -650,6 +680,16 @@
   el.start.addEventListener('click', newGame);
   el.rulesBtn.addEventListener('click', () => { syncRuleInputs(); openModal('modal-rules'); });
   el.statsBtn.addEventListener('click', () => { renderStats(); openModal('modal-stats'); });
+  el.axiomBtn.addEventListener('click', () => { renderAxiomInfo(); openModal('modal-axiom'); });
+  el.exportBtn.addEventListener('click', exportGames);
+  el.resetExp.addEventListener('click', () => {
+    closeModal('modal-axiom');
+    confirmDialog('경험 초기화', `${AXIOM}이 이 브라우저의 대국에서 배운 국면과 대국 기록을 모두 지울까요? (모델 자체의 학습은 유지됩니다)`, '초기화', () => {
+      experience = {}; gameLog = [];
+      store.set(EXP_KEY, experience); store.set(GAMES_KEY, gameLog);
+      updateMenuSummary();
+    });
+  });
   el.resetStats.addEventListener('click', () => {
     closeModal('modal-stats');
     confirmDialog('전적 초기화', '모든 전적과 최근 경기 기록을 삭제할까요?', '초기화', () => {
@@ -661,7 +701,6 @@
 
   function goHome() {
     resetWorker();
-    stopTimer();
     closeModal('modal-result');
     showScreen('main');
   }

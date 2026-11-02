@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1c1a17">
   <title>웹 오목 마스터</title>
-  <meta name="description" content="5단계 난이도 AI와 겨루는 15×15 웹 오목 게임 (렌주룰 지원)">
+  <meta name="description" content="전용 오목 AI AXIOM과 겨루는 15×15 웹 오목 게임 (5단계 난이도, 렌주룰 지원)">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -17,6 +17,15 @@
         <h1 id="main-title">웹 오목 마스터</h1>
         <p class="tagline">흑으로 먼저 두고, 다섯 개를 먼저 이으세요.</p>
       </header>
+
+      <button class="axiom-card" id="btn-axiom" aria-label="AXIOM 정보 보기">
+        <span class="axiom-logo" aria-hidden="true">AX</span>
+        <span class="axiom-text">
+          <b><span class="axiom-name">AXIOM</span> <span id="axiom-version" class="chip">v1</span></b>
+          <small id="axiom-summary">전용 오목 AI</small>
+        </span>
+        <span class="axiom-more" aria-hidden="true">자세히 ›</span>
+      </button>
 
       <section class="panel" aria-labelledby="lv-title">
         <h2 id="lv-title" class="panel-title">난이도 선택</h2>
@@ -50,14 +59,12 @@
           <div class="pinfo">
             <strong>플레이어</strong><small>흑 · 선공</small>
           </div>
-          <div class="timer" id="timer" aria-live="off"><span id="timer-text">--</span></div>
-          <div class="timer-bar"><i id="timer-bar"></i></div>
         </div>
         <div class="vs">VS</div>
         <div class="player" id="p-white">
           <span class="stone-icon w" aria-hidden="true"></span>
           <div class="pinfo">
-            <strong>AI</strong><small id="ai-level-label">백</small>
+            <strong id="ai-name">AXIOM</strong><small id="ai-level-label">백</small>
           </div>
           <div class="thinking" aria-hidden="true"><i></i><i></i><i></i></div>
         </div>
@@ -91,15 +98,6 @@
         <input type="checkbox" id="opt-overline" class="switch">
       </label>
       <label class="opt">
-        <span><b>제한 시간 (한 수)</b><small>시간을 넘기면 패배합니다.</small></span>
-        <select id="opt-timer">
-          <option value="0">무제한</option>
-          <option value="15">15초</option>
-          <option value="30">30초</option>
-          <option value="60">60초</option>
-        </select>
-      </label>
-      <label class="opt">
         <span><b>금수 위치 표시</b><small>렌주룰 사용 시 둘 수 없는 자리를 ×로 표시합니다.</small></span>
         <input type="checkbox" id="opt-showforb" class="switch">
       </label>
@@ -122,6 +120,21 @@
       <ul class="history" id="stats-history"></ul>
       <div class="modal-actions">
         <button class="btn ghost" id="btn-reset-stats">전적 초기화</button>
+        <button class="btn primary" data-close>닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-axiom" role="dialog" aria-modal="true" aria-labelledby="axiom-title" hidden>
+    <div class="modal-card">
+      <h2 id="axiom-title">AXIOM</h2>
+      <p class="axiom-desc">웹 오목 마스터 전용 오목 AI입니다. 스스로 대국하며 평가 함수를 학습하고, 이전 버전과의 평가 대국을 통과해야 새 버전이 됩니다. 여기에 더해 이 브라우저에서 둔 대국을 기억해 진 수는 피하고 이긴 수는 다시 둡니다.</p>
+      <dl class="kv" id="axiom-model-info"></dl>
+      <h3 class="sub">이 브라우저에서의 학습</h3>
+      <dl class="kv" id="axiom-local-info"></dl>
+      <div class="modal-actions wrap">
+        <button class="btn ghost" id="btn-reset-exp">경험 초기화</button>
+        <button class="btn" id="btn-export">대국 기록 내보내기</button>
         <button class="btn primary" data-close>닫기</button>
       </div>
     </div>
@@ -152,6 +165,7 @@
   </div>
 
   <script src="js/rules.js"></script>
+  <script src="js/axiom-model.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/main.js"></script>
 </body>
