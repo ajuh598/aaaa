@@ -140,6 +140,21 @@ console.log('[AI] VCF');
   ok(v >= 0, 'VCF 발견 (' + v + ')');
 }
 
+console.log('[AI] VCT (3·4 연속 공격)');
+{
+  // 백: 가로 (7,7)(8,7), 세로 (9,8)(9,9) → (9,7) 에 두면 삼삼(백은 금수 없음) → 연속 공격 승
+  const e = eng([[7, 7, 2], [8, 7, 2], [9, 8, 2], [9, 9, 2], [0, 0, 1], [0, 14, 1], [14, 0, 1], [14, 14, 1], [1, 1, 1]]);
+  ok(e.vcf(2, 12, 20000) < 0, 'VCF 로는 못 찾는 국면');
+  const v = e.vct(2, 6, 20000);
+  ok(v >= 0, 'VCT 발견 (' + v + ')');
+  // 흑이 같은 형태(삼삼 연결점)를 가졌을 때: 매우 어려움 이상은 연결점(또는 그 선)을 막는다
+  for (const lv of [4, 5]) {
+    const d = eng([[7, 7, 1], [0, 0, 2], [8, 7, 1], [14, 0, 2], [10, 8, 1], [0, 14, 2], [10, 9, 1]], { renju: false });
+    const r = d.think(2, Object.assign({}, AI.LEVELS[lv], { time: 2500 }));
+    ok(d.board[r.move] === 0 && [at(9, 7), at(10, 7), at(6, 7), at(10, 10), at(10, 6), at(11, 7)].includes(r.move), `Lv${lv}: 흑 삼삼 연결 대비 수 (${r.move % 15},${(r.move / 15) | 0})`);
+  }
+}
+
 console.log('[AXIOM] 모델 / 경험 학습');
 {
   ok(AI.MODEL && AI.MODEL.weights.length === AI.NF, '모델 가중치 개수 = 특징 개수');

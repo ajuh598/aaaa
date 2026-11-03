@@ -542,6 +542,112 @@
     }
 
     // -------------------------------------------------------------------------
+    // VCT: 열린 3과 4를 섞어 상대가 막을 수 없는 연속 공격을 찾는다. 성공하면 첫 수, 아니면 -1
+    //   공격 노드: 4 또는 열린 3을 만드는 수
+    //   수비 노드: 공격자의 4 자리(5목 자리/4를 만드는 자리) 막기 + 수비자의 4(역공) — 모두 막혀야 성공
+    // -------------------------------------------------------------------------
+    vct(p, maxDepth, nodeLimit) {
+      this.vctNodes = 0;
+      this.vctLimit = nodeLimit || 20000;
+      this.vctFail = new Map();
+      this.vctWin = new Map();
+      const base = this.count;
+      try {
+        return this._vctAttack(p, maxDepth);
+      } catch (err) {
+        if (!(err instanceof Abort)) throw err;
+        while (this.count > base) this.unmake();
+        return -1;
+      }
+    }
+
+    hasOpenThree(p, i) {
+      const sh = this.shape[p];
+      for (let d = 0; d < 4; d++) if (sh[i * 4 + d] === S_L3) return true;
+      return false;
+    }
+
+    _vctTick() {
+      if (++this.vctNodes > this.vctLimit) throw new Abort();
+      if ((this.vctNodes & 255) === 0 && now() > this.deadline) throw new Abort();
+    }
+
+    _vctAttack(p, depth) {
+      const o = 3 - p, b = this.board;
+      if (this.cnt[p][6] > 0) { const m = this.findLevel(p, 6); if (m >= 0) return m; }
+      this._vctTick();
+
+      if (this.cnt[o][6] > 0) {
+        // 상대 4: 막는 수밖에 없음. 막은 뒤에도 내 위협이 살아 있어야 계속
+        let blk = -1, n = 0;
+        for (let i = 0; i < SIZE; i++) if (b[i] === 0 && this.level[o][i] === 6) { blk = i; n++; }
+        if (n !== 1 || (p === 1 && this.forb[blk])) return -1;
+        this.make(blk, p);
+        const ok = (this.cnt[p][6] > 0 || this.cnt[p][5] > 0) && this._vctDefend(p, depth);
+        this.unmake();
+        return ok ? blk : -1;
+      }
+      if (this.cnt[p][5] > 0) { const m = this.findLevel(p, 5); if (m >= 0) return m; }
+      if (depth <= 0) return -1;
+
+      const key = this.key() * 2 + (p - 1);
+      const f = this.vctFail.get(key);
+      if (f !== undefined && f >= depth) return -1;
+
+      const cands = [];
+      for (let i = 0; i < SIZE; i++) {
+        if (b[i] !== 0 || this.nb[i] === 0) continue;
+        if (p === 1 && this.forb[i]) continue;
+        if (this.hasFour(p, i) || this.hasOpenThree(p, i)) cands.push(i);
+      }
+      cands.sort((a, c) => (this.level[p][c] - this.level[p][a]) || (this.ceval[p][c] + this.ceval[o][c] - this.ceval[p][a] - this.ceval[o][a]));
+
+      for (const c of cands) {
+        this.make(c, p);
+        let ok = false;
+        if (this.cnt[p][6] > 0 || this.cnt[p][5] > 0) ok = this._vctDefend(p, depth - 1);
+        this.unmake();
+        if (ok) return c;
+      }
+      this.vctFail.set(key, depth);
+      return -1;
+    }
+
+    /** o(수비) 차례. p 가 위협 중일 때 모든 수비를 이겨내면 true */
+    _vctDefend(p, depth) {
+      const o = 3 - p, b = this.board;
+      this._vctTick();
+      if (this.cnt[o][6] > 0) return false; // 수비 측이 먼저 5목
+      const defs = [];
+      if (this.cnt[p][6] > 0) {
+        for (let i = 0; i < SIZE; i++) if (b[i] === 0 && this.level[p][i] === 6) defs.push(i);
+        if (defs.length >= 2) return true;
+        if (o === 1 && this.forb[defs[0]]) return true; // 흑이 금수라 막지 못함
+      } else {
+        for (let i = 0; i < SIZE; i++) {
+          if (b[i] !== 0) continue;
+          if (o === 1 && this.forb[i]) continue;
+          if (this.level[p][i] >= 2 || this.hasFour(p, i) || (this.nb[i] && this.hasFour(o, i))) defs.push(i);
+        }
+        if (!defs.length) return true;
+      }
+      for (const d of defs) {
+        this.make(d, o);
+        const r = this._vctAttack(p, depth);
+        this.unmake();
+        if (r < 0) return false;
+      }
+      return true;
+    }
+
+    /** 상대(o)가 지금 강제승(VCF, 옵션으로 VCT)을 가지고 있는지 */
+    opponentForcedWin(o, cfg) {
+      if (this.vcf(o, cfg.defendVcf, cfg.vcfNodes ? Math.floor(cfg.vcfNodes / 4) : 4000) >= 0) return true;
+      if (cfg.defendVct && this.vct(o, cfg.defendVct, cfg.defendVctNodes || 6000) >= 0) return true;
+      return false;
+    }
+
+    // -------------------------------------------------------------------------
     // 루트 탐색 (반복 심화)
     // -------------------------------------------------------------------------
     rootSearch(p, cfg, moves, adj) {
@@ -607,6 +713,14 @@
         const v = this.vcf(p, cfg.vcf, cfg.vcfNodes);
         if (v >= 0) { info.vcf = true; return done(v); }
       }
+      // 수읽기: 3과 4를 섞은 연속 공격 (상대에게 4 역공이 없을 때만 확정)
+      if (cfg.vct && this.cnt[o][6] === 0) {
+        const saved = this.deadline;
+        this.deadline = Math.min(saved, now() + (cfg.vctTime || cfg.time * 0.3));
+        const v = this.vct(p, cfg.vct, cfg.vctNodes);
+        this.deadline = saved;
+        if (v >= 0 && !(p === 1 && this.forb[v])) { info.vct = true; return done(v); }
+      }
 
       // 경험(내 대국 기록 + 모델 오프닝 북)으로 루트 후보 보정
       let adj = null;
@@ -642,17 +756,17 @@
         }
       }
 
-      // 상대 VCF 방어: 고른 수 이후 상대가 연속 4로 이기면 다른 후보를 검토
+      // 상대 강제승 방어: 고른 수 이후 상대가 연속 4(·3)로 이기면 다른 후보를 검토
       if (cfg.defendVcf && res.bestScore < WIN_TH) {
-        this.deadline = Math.max(this.deadline, now() + 800);
+        this.deadline = Math.max(this.deadline, now() + (cfg.defendTime || 800));
         const tryList = [move].concat(res.order.filter(m => m !== move)).slice(0, cfg.defendTries || 6);
         for (const m of tryList) {
           const s = res.scores.get(m);
           if (s !== undefined && s < -WIN_TH && m !== move) continue;
           this.make(m, p);
-          const threat = this.vcf(o, cfg.defendVcf, cfg.vcfNodes ? Math.floor(cfg.vcfNodes / 4) : 4000);
+          const threat = this.opponentForcedWin(o, cfg);
           this.unmake();
-          if (threat < 0) { move = m; break; }
+          if (!threat) { if (m !== move) info.defended = true; move = m; break; }
         }
       }
       return done(move);
@@ -698,11 +812,22 @@
   // 난이도 설정
   // ---------------------------------------------------------------------------
   const LEVELS = {
-    1: { name: '쉬움', mode: 'greedy', missWin: 0.15, missBlock: 0.45, missDefense: 0.5, top: 4, time: 300 },
-    2: { name: '보통', mode: 'search', depth: 2, K: 8, time: 700, exactRoot: true, noise: 400, blunder: 0.15 },
-    3: { name: '어려움', mode: 'search', depth: 4, K: 10, time: 1500 },
-    4: { name: '매우 어려움', mode: 'search', depth: 6, K: 10, rootK: 14, time: 2500, vcf: 12, vcfNodes: 15000, defendVcf: 10, defendTries: 5 },
-    5: { name: '익스트림', mode: 'search', depth: 12, K: 12, rootK: 18, time: 4000, vcf: 24, vcfNodes: 60000, defendVcf: 16, defendTries: 8 }
+    1: { name: '쉬움', mode: 'greedy', missWin: 0.05, missBlock: 0.2, missDefense: 0.3, top: 3, time: 300 },
+    2: { name: '보통', mode: 'search', depth: 3, K: 9, time: 900, exactRoot: true, noise: 150, blunder: 0.06, vcf: 6, vcfNodes: 3000 },
+    3: { name: '어려움', mode: 'search', depth: 6, K: 10, rootK: 14, time: 2000, vcf: 12, vcfNodes: 15000, defendVcf: 10, defendTries: 5 },
+    4: { name: '매우 어려움', mode: 'search', depth: 10, K: 11, rootK: 16, time: 3500, vcf: 18, vcfNodes: 30000,
+      vct: 6, vctNodes: 20000, vctTime: 700, defendVcf: 14, defendVct: 5, defendVctNodes: 6000, defendTries: 8, defendTime: 1200 },
+    5: { name: '익스트림', mode: 'search', depth: 16, K: 12, rootK: 20, time: 6000, vcf: 26, vcfNodes: 80000,
+      vct: 9, vctNodes: 60000, vctTime: 1500, defendVcf: 18, defendVct: 7, defendVctNodes: 12000, defendTries: 10, defendTime: 2000 }
+  };
+
+  // 이전(v1 이전) 난이도 설정 — 강도 비교용
+  const LEGACY_LEVELS = {
+    1: { mode: 'greedy', missWin: 0.15, missBlock: 0.45, missDefense: 0.5, top: 4, time: 300 },
+    2: { mode: 'search', depth: 2, K: 8, time: 700, exactRoot: true, noise: 400, blunder: 0.15 },
+    3: { mode: 'search', depth: 4, K: 10, time: 1500 },
+    4: { mode: 'search', depth: 6, K: 10, rootK: 14, time: 2500, vcf: 12, vcfNodes: 15000, defendVcf: 10, defendTries: 5 },
+    5: { mode: 'search', depth: 12, K: 12, rootK: 18, time: 4000, vcf: 24, vcfNodes: 60000, defendVcf: 16, defendTries: 8 }
   };
 
   // ---------------------------------------------------------------------------
@@ -811,7 +936,7 @@
   }
 
   return {
-    Engine, LEVELS, chooseMove, WIN, NF, FEATURE_NAMES, BASELINE_WEIGHTS,
+    Engine, LEVELS, LEGACY_LEVELS, chooseMove, WIN, NF, FEATURE_NAMES, BASELINE_WEIGHTS,
     MODEL: ACTIVE_MODEL, modelLabel,
     positionKey, symIdx, canonMove, experienceFromGame, addExperience, lookupExperience,
     _getTable: getTable, S: { S_NONE, S_B2, S_L2, S_B3, S_L3, S_B4, S_L4, S_D4, S_FIVE }

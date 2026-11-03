@@ -38,7 +38,8 @@ function randomOpening(rng, plies, rules) {
  *  collect: true 이면 조용한 국면의 특징 벡터를 수집
  * 반환: { winner: 0|1|2, moves, positions: [{ f, p }] }
  */
-function playGame({ black, white, opening, cfg, rules, collect, explore, seed }) {
+function playGame({ black, white, opening, cfg, cfgBlack, cfgWhite, rules, collect, explore, seed }) {
+  const cfgs = [null, cfgBlack || cfg, cfgWhite || cfg];
   const rng = makeRng(seed || 1);
   const eng = [null, new AI.Engine(rules, black), new AI.Engine(rules, white)];
   const moves = [];
@@ -54,9 +55,9 @@ function playGame({ black, white, opening, cfg, rules, collect, explore, seed })
     let m;
     if (explore && moves.length < explore.plies && rng() < explore.eps) {
       const cand = e.genMoves(p, 3);
-      m = cand.length ? cand[Math.floor(rng() * cand.length)] : e.think(p, cfg, rng).move;
+      m = cand.length ? cand[Math.floor(rng() * cand.length)] : e.think(p, cfgs[p], rng).move;
     } else {
-      m = e.think(p, cfg, rng).move;
+      m = e.think(p, cfgs[p], rng).move;
     }
     if (m < 0 || e.board[m] !== 0) return { winner: 3 - p, moves, positions, reason: 'illegal' };
     if (p === 1 && rules.renju && R.forbiddenType(e.board, m)) return { winner: 2, moves, positions, reason: 'forbidden' };

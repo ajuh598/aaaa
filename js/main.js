@@ -9,11 +9,11 @@
   const MIN_AI_DELAY = 420; // AI 착수 최소 연출 시간(ms)
 
   const LEVEL_INFO = [null,
-    { name: '쉬움', desc: '1수 앞만 보며 가끔 실수 · 처음 오목을 두는 분' },
-    { name: '보통', desc: '2수 앞 수읽기 · 기본 공격과 방어' },
-    { name: '어려움', desc: '미니맥스 + 알파베타 4수 앞 · 수싸움' },
-    { name: '매우 어려움', desc: '6수 앞 + 연속 4(VCF) 공격 · 중상급' },
-    { name: '익스트림', desc: '최대 12수 반복 심화 + VCF 공방 · 고수' }
+    { name: '쉬움', desc: '1수 앞 판단 · 가끔 방어를 놓침 · 입문자' },
+    { name: '보통', desc: '3수 앞 수읽기 + 짧은 연속 4 · 기본기 점검' },
+    { name: '어려움', desc: '6수 앞 알파베타 + 연속 4 공방 · 수싸움' },
+    { name: '매우 어려움', desc: '10수 앞 + 3·4 연속 공격(VCT) 공방 · 상급' },
+    { name: '익스트림', desc: '최대 16수 반복 심화 + 깊은 VCF·VCT · 고수' }
   ];
 
   // ---------------------------------------------------------------------------
@@ -207,7 +207,9 @@
       const t = (info.time / 1000).toFixed(2);
       const parts = [];
       if (info.vcf) parts.push('연속 4 수읽기 성공');
+      else if (info.vct) parts.push('3·4 연속 공격 수읽기 성공');
       else if (info.depth && game.level >= 3) parts.push(`탐색 깊이 ${info.depth}`);
+      if (info.defended) parts.push('상대 연속 공격 차단');
       if (info.experience) parts.push('지난 대국 경험 반영');
       el.aiInfo.textContent = parts.length ? `${AXIOM} · ${parts.join(' · ')} · ${t}초` : '';
     }
